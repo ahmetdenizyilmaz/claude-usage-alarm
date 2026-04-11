@@ -51,6 +51,7 @@ export async function getUsagePercent() {
     const resetTime = new Date(usage.sessionWindow.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
     text += `  Session window: ${new Date(usage.sessionWindow.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${resetTime}\n`;
   }
+  text += `  ${limits.isPeak ? "Peak hours (tokens cost 2x)" : "Off-peak (full rate)"}\n`;
   text += `  Limits source: ${limits.source}\n`;
 
   return {

@@ -8,26 +8,48 @@ const LIMITS_PATH = join(__dirname, "..", "limits-config.json");
 
 // Hardcoded estimates per plan (output tokens per 5h window)
 // Based on community analysis (Claude-Code-Usage-Monitor project)
-// Hardcoded estimates per plan (output tokens)
-// These are rough estimates — use recalculate_limits to refine via P90 analysis
-// or manually adjust via set_plan_limits after observing /usage %
+// Base estimates per plan (output tokens) — these are OFF-PEAK limits.
+// During peak hours (13:00-19:00 UTC, weekdays), tokens consume at ~2x rate,
+// so effective limit is halved.
 const PLAN_DEFAULTS: Record<string, PlanLimits> = {
   pro: {
-    sessionOutputTokens: 45_000,
-    weeklyOutputTokens: 225_000,
-    sonnetSessionOutputTokens: 45_000,
+    sessionOutputTokens: 90_000,
+    weeklyOutputTokens: 450_000,
+    sonnetSessionOutputTokens: 90_000,
   },
   max5: {
-    sessionOutputTokens: 175_000,
-    weeklyOutputTokens: 875_000,
-    sonnetSessionOutputTokens: 175_000,
+    sessionOutputTokens: 350_000,
+    weeklyOutputTokens: 1_750_000,
+    sonnetSessionOutputTokens: 350_000,
   },
   max20: {
-    sessionOutputTokens: 375_000,
-    weeklyOutputTokens: 2_500_000,
-    sonnetSessionOutputTokens: 375_000,
+    sessionOutputTokens: 750_000,
+    weeklyOutputTokens: 5_000_000,
+    sonnetSessionOutputTokens: 750_000,
   },
 };
+
+// Peak hours: 13:00-19:00 UTC on weekdays (Mon-Fri)
+// During peak, tokens count ~2x against your budget
+const PEAK_START_UTC = 13;
+const PEAK_END_UTC = 19;
+const PEAK_MULTIPLIER = 2.0;
+
+export function getCurrentMultiplier(): { multiplier: number; isPeak: boolean; peakHoursUTC: string } {
+  const now = new Date();
+  const utcHour = now.getUTCHours();
+  const utcDay = now.getUTCDay(); // 0=Sun, 6=Sat
+
+  const isWeekday = utcDay >= 1 && utcDay <= 5;
+  const isPeakHour = utcHour >= PEAK_START_UTC && utcHour < PEAK_END_UTC;
+  const isPeak = isWeekday && isPeakHour;
+
+  return {
+    multiplier: isPeak ? PEAK_MULTIPLIER : 1.0,
+    isPeak,
+    peakHoursUTC: `${PEAK_START_UTC}:00-${PEAK_END_UTC}:00 UTC (weekdays)`,
+  };
+}
 
 export interface PlanLimits {
   sessionOutputTokens: number;
@@ -99,26 +121,42 @@ export async function setCustomLimits(limits: Partial<PlanLimits>): Promise<Limi
 }
 
 /**
- * Get the effective limits — adaptive if available and enabled, otherwise hardcoded
+ * Get the effective limits — applies peak/off-peak multiplier.
+ * During peak hours, the effective limit is halved (tokens cost 2x).
  */
-export async function getEffectiveLimits(): Promise<PlanLimits & { source: "hardcoded" | "adaptive" }> {
+export async function getEffectiveLimits(): Promise<PlanLimits & { source: "hardcoded" | "adaptive"; isPeak: boolean; multiplier: number }> {
   const config = await readLimitsConfig();
+  const { multiplier, isPeak } = getCurrentMultiplier();
+
+  let baseLimits: PlanLimits;
+  let source: "hardcoded" | "adaptive";
 
   if (
     config.useAdaptive &&
     config.adaptive.sessionOutputTokens !== null &&
     config.adaptive.sampleCount >= 3
   ) {
-    return {
+    baseLimits = {
       sessionOutputTokens: config.adaptive.sessionOutputTokens,
       weeklyOutputTokens: config.adaptive.weeklyOutputTokens ?? config.hardcoded.weeklyOutputTokens,
       sonnetSessionOutputTokens:
         config.adaptive.sonnetSessionOutputTokens ?? config.hardcoded.sonnetSessionOutputTokens,
-      source: "adaptive",
     };
+    source = "adaptive";
+  } else {
+    baseLimits = { ...config.hardcoded };
+    source = "hardcoded";
   }
 
-  return { ...config.hardcoded, source: "hardcoded" };
+  // During peak, effective limit is reduced (tokens cost more)
+  return {
+    sessionOutputTokens: Math.round(baseLimits.sessionOutputTokens / multiplier),
+    weeklyOutputTokens: baseLimits.weeklyOutputTokens, // weekly not affected by hourly peak
+    sonnetSessionOutputTokens: Math.round(baseLimits.sonnetSessionOutputTokens / multiplier),
+    source,
+    isPeak,
+    multiplier,
+  };
 }
 
 /**
