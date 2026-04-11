@@ -37,27 +37,35 @@ export async function getUsagePercent() {
 
   text += `  Current session\n`;
   text += `  ${progressBar(sessionPercent)}\n`;
-  text += `  ${formatTokens(usage.sessionOutputTokens)} / ${formatTokens(limits.sessionOutputTokens)} output tokens\n\n`;
+  text += `  ${formatTokens(usage.sessionOutputTokens)} weighted / ${formatTokens(limits.sessionOutputTokens)} budget\n`;
+  if (usage.sessionDetails) {
+    const d = usage.sessionDetails;
+    text += `  (${formatTokens(d.rawOutputTokens)} raw`;
+    if (d.peakTokens > 0) text += `, ${formatTokens(d.peakTokens)} peak@2x`;
+    if (d.offPeakTokens > 0) text += `, ${formatTokens(d.offPeakTokens)} off-peak@1x`;
+    text += `)\n`;
+  }
+  text += `\n`;
 
   text += `  Current week (all models)\n`;
   text += `  ${progressBar(weeklyPercent)}\n`;
-  text += `  ${formatTokens(usage.weeklyOutputTokens)} / ${formatTokens(limits.weeklyOutputTokens)} output tokens\n\n`;
+  text += `  ${formatTokens(usage.weeklyOutputTokens)} weighted / ${formatTokens(limits.weeklyOutputTokens)} budget\n\n`;
 
   text += `  Current week (Sonnet only)\n`;
   text += `  ${progressBar(sonnetPercent)}\n`;
-  text += `  ${formatTokens(usage.sonnetSessionOutputTokens)} / ${formatTokens(limits.sonnetSessionOutputTokens)} output tokens\n\n`;
+  text += `  ${formatTokens(usage.sonnetSessionOutputTokens)} weighted / ${formatTokens(limits.sonnetSessionOutputTokens)} budget\n\n`;
 
   if (usage.sessionWindow) {
     const resetTime = new Date(usage.sessionWindow.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    text += `  Session window: ${new Date(usage.sessionWindow.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${resetTime}\n`;
+    text += `  Resets ${resetTime}\n`;
   }
   text += `  ${limits.isPeak ? "Peak hours (tokens cost 2x)" : "Off-peak (full rate)"}\n`;
-  text += `  Limits source: ${limits.source}\n`;
 
   return {
     text,
     session: {
       used: usage.sessionOutputTokens,
+      raw: usage.sessionDetails?.rawOutputTokens,
       limit: limits.sessionOutputTokens,
       percent: Math.round(sessionPercent * 10) / 10,
     },
@@ -71,6 +79,6 @@ export async function getUsagePercent() {
       limit: limits.sonnetSessionOutputTokens,
       percent: Math.round(sonnetPercent * 10) / 10,
     },
-    limitsSource: limits.source,
+    isPeak: limits.isPeak,
   };
 }

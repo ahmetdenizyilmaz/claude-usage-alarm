@@ -2,6 +2,7 @@ import { readFile, writeFile } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
 import { scanAllSessions, detectSessionWindowStart } from "./session-scanner.js";
+import { scanWeightedUsage } from "./weighted-scanner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LIMITS_PATH = join(__dirname, "..", "limits-config.json");
@@ -121,8 +122,8 @@ export async function setCustomLimits(limits: Partial<PlanLimits>): Promise<Limi
 }
 
 /**
- * Get the effective limits — applies peak/off-peak multiplier.
- * During peak hours, the effective limit is halved (tokens cost 2x).
+ * Get the base limits — no multiplier adjustment here.
+ * Tokens are weighted at scan time instead (peak tokens count as 2x).
  */
 export async function getEffectiveLimits(): Promise<PlanLimits & { source: "hardcoded" | "adaptive"; isPeak: boolean; multiplier: number }> {
   const config = await readLimitsConfig();
@@ -148,11 +149,8 @@ export async function getEffectiveLimits(): Promise<PlanLimits & { source: "hard
     source = "hardcoded";
   }
 
-  // During peak, effective limit is reduced (tokens cost more)
   return {
-    sessionOutputTokens: Math.round(baseLimits.sessionOutputTokens / multiplier),
-    weeklyOutputTokens: baseLimits.weeklyOutputTokens, // weekly not affected by hourly peak
-    sonnetSessionOutputTokens: Math.round(baseLimits.sonnetSessionOutputTokens / multiplier),
+    ...baseLimits,
     source,
     isPeak,
     multiplier,
@@ -266,38 +264,40 @@ export async function recalculateAdaptiveLimits(): Promise<LimitsConfig> {
 }
 
 /**
- * Get current session output tokens and weekly output tokens for percentage calculation.
- * Uses gap-based session detection instead of a rolling 5h window.
+ * Get current usage with per-token peak/off-peak weighting.
+ * Each token is multiplied by the rate at the time it was consumed:
+ *   - Peak (13:00-19:00 UTC weekdays): 2x
+ *   - Off-peak: 1x
+ * The weighted total divided by the base (off-peak) budget gives accurate %.
  */
 export async function getCurrentUsageForPercent() {
   const now = new Date();
 
   // Detect actual session window via gap analysis
   const sessionWindow = await detectSessionWindowStart();
-  const sessionBucket = await scanAllSessions({ cutoffTime: sessionWindow.start });
 
-  // Weekly = last 7 days
-  const weeklyCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const weeklyBucket = await scanAllSessions({ cutoffTime: weeklyCutoff });
-
-  // Sonnet session = same window, sonnet only
-  const sonnetBucket = await scanAllSessions({
-    cutoffTime: sessionWindow.start,
-    model: "claude-sonnet-4-6",
-  });
+  // Weighted scans — each token multiplied by its time-of-day rate
+  const [sessionWeighted, weeklyWeighted, sonnetWeighted] = await Promise.all([
+    scanWeightedUsage({ cutoffTime: sessionWindow.start }),
+    scanWeightedUsage({ cutoffTime: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) }),
+    scanWeightedUsage({ cutoffTime: sessionWindow.start, model: "claude-sonnet-4-6" }),
+  ]);
 
   return {
-    sessionOutputTokens: sessionBucket.outputTokens,
-    weeklyOutputTokens: weeklyBucket.outputTokens,
-    sonnetSessionOutputTokens: sonnetBucket.outputTokens,
+    // Use weighted tokens for percentage calculation
+    sessionOutputTokens: sessionWeighted.weightedOutputTokens,
+    weeklyOutputTokens: weeklyWeighted.weightedOutputTokens,
+    sonnetSessionOutputTokens: sonnetWeighted.weightedOutputTokens,
     sessionWindow: {
       start: sessionWindow.start.toISOString(),
       end: sessionWindow.end.toISOString(),
     },
     sessionDetails: {
-      totalTokens: sessionBucket.totalTokens,
-      messageCount: sessionBucket.messageCount,
-      byModel: sessionBucket.byModel,
+      rawOutputTokens: sessionWeighted.rawOutputTokens,
+      weightedOutputTokens: sessionWeighted.weightedOutputTokens,
+      peakTokens: sessionWeighted.peakOutputTokens,
+      offPeakTokens: sessionWeighted.offPeakOutputTokens,
+      messageCount: sessionWeighted.messageCount,
     },
   };
 }
