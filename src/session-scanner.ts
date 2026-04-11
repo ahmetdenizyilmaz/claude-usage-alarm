@@ -118,6 +118,101 @@ export async function scanAllSessions(options: ScanOptions = {}): Promise<TokenB
   return result;
 }
 
+/**
+ * Detect the current session window start time.
+ * Scans recent messages across all sessions, finds the last gap >= 5 hours,
+ * and rounds the first post-gap message to the nearest UTC hour.
+ * This matches how Anthropic's rate limit window works.
+ */
+export async function detectSessionWindowStart(): Promise<{ start: Date; end: Date }> {
+  const SESSION_DURATION_MS = 5 * 60 * 60 * 1000;
+  const now = new Date();
+  // Look back up to 24 hours for activity
+  const lookback = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+  const projectsDir = join(homedir(), ".claude", "projects");
+  const allTimestamps: number[] = [];
+
+  let projectDirs: string[];
+  try {
+    projectDirs = await readdir(projectsDir);
+  } catch {
+    // Fallback: round current hour - 5h
+    const fallbackStart = roundToHour(new Date(now.getTime() - SESSION_DURATION_MS));
+    return { start: fallbackStart, end: new Date(fallbackStart.getTime() + SESSION_DURATION_MS) };
+  }
+
+  for (const projDir of projectDirs) {
+    const projPath = join(projectsDir, projDir);
+    let files: string[];
+    try {
+      files = await readdir(projPath);
+    } catch {
+      continue;
+    }
+
+    for (const file of files) {
+      if (!file.endsWith(".jsonl")) continue;
+      try {
+        const raw = await readFile(join(projPath, file), "utf-8");
+        const lines = raw.split("\n");
+
+        // Quick skip: check last line timestamp
+        for (let i = lines.length - 1; i >= 0; i--) {
+          if (!lines[i].trim()) continue;
+          try {
+            const last = JSON.parse(lines[i]);
+            if (last.timestamp && new Date(last.timestamp) < lookback) break;
+          } catch {}
+          break;
+        }
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const entry = JSON.parse(line);
+            if (entry.type !== "assistant" || !entry.timestamp) continue;
+            const ts = new Date(entry.timestamp).getTime();
+            if (ts >= lookback.getTime()) {
+              allTimestamps.push(ts);
+            }
+          } catch {}
+        }
+      } catch {}
+    }
+  }
+
+  if (allTimestamps.length === 0) {
+    const fallbackStart = roundToHour(now);
+    return { start: fallbackStart, end: new Date(fallbackStart.getTime() + SESSION_DURATION_MS) };
+  }
+
+  // Sort chronologically
+  allTimestamps.sort((a, b) => a - b);
+
+  // Walk backwards from the end, find the last gap >= 5 hours
+  let sessionStartTs = allTimestamps[0];
+  for (let i = allTimestamps.length - 1; i > 0; i--) {
+    const gap = allTimestamps[i] - allTimestamps[i - 1];
+    if (gap >= SESSION_DURATION_MS) {
+      // Gap found — session starts at the message after the gap
+      sessionStartTs = allTimestamps[i];
+      break;
+    }
+  }
+
+  const start = roundToHour(new Date(sessionStartTs));
+  const end = new Date(start.getTime() + SESSION_DURATION_MS);
+
+  return { start, end };
+}
+
+function roundToHour(d: Date): Date {
+  const rounded = new Date(d);
+  rounded.setMinutes(0, 0, 0);
+  return rounded;
+}
+
 export async function getLatestSessionId(): Promise<string | null> {
   const sessionsDir = join(homedir(), ".claude", "sessions");
   try {

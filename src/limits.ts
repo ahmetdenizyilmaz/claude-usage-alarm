@@ -1,7 +1,7 @@
 import { readFile, writeFile } from "fs/promises";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { scanAllSessions } from "./session-scanner.js";
+import { scanAllSessions, detectSessionWindowStart } from "./session-scanner.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const LIMITS_PATH = join(__dirname, "..", "limits-config.json");
@@ -228,22 +228,23 @@ export async function recalculateAdaptiveLimits(): Promise<LimitsConfig> {
 }
 
 /**
- * Get current session output tokens and weekly output tokens for percentage calculation
+ * Get current session output tokens and weekly output tokens for percentage calculation.
+ * Uses gap-based session detection instead of a rolling 5h window.
  */
 export async function getCurrentUsageForPercent() {
   const now = new Date();
 
-  // Session = last 5 hours
-  const sessionCutoff = new Date(now.getTime() - 5 * 60 * 60 * 1000);
-  const sessionBucket = await scanAllSessions({ cutoffTime: sessionCutoff });
+  // Detect actual session window via gap analysis
+  const sessionWindow = await detectSessionWindowStart();
+  const sessionBucket = await scanAllSessions({ cutoffTime: sessionWindow.start });
 
   // Weekly = last 7 days
   const weeklyCutoff = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const weeklyBucket = await scanAllSessions({ cutoffTime: weeklyCutoff });
 
-  // Sonnet session = last 5 hours, sonnet only
+  // Sonnet session = same window, sonnet only
   const sonnetBucket = await scanAllSessions({
-    cutoffTime: sessionCutoff,
+    cutoffTime: sessionWindow.start,
     model: "claude-sonnet-4-6",
   });
 
@@ -251,6 +252,10 @@ export async function getCurrentUsageForPercent() {
     sessionOutputTokens: sessionBucket.outputTokens,
     weeklyOutputTokens: weeklyBucket.outputTokens,
     sonnetSessionOutputTokens: sonnetBucket.outputTokens,
+    sessionWindow: {
+      start: sessionWindow.start.toISOString(),
+      end: sessionWindow.end.toISOString(),
+    },
     sessionDetails: {
       totalTokens: sessionBucket.totalTokens,
       messageCount: sessionBucket.messageCount,

@@ -47,6 +47,10 @@ export async function getUsagePercent() {
   text += `  ${progressBar(sonnetPercent)}\n`;
   text += `  ${formatTokens(usage.sonnetSessionOutputTokens)} / ${formatTokens(limits.sonnetSessionOutputTokens)} output tokens\n\n`;
 
+  if (usage.sessionWindow) {
+    const resetTime = new Date(usage.sessionWindow.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    text += `  Session window: ${new Date(usage.sessionWindow.start).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - ${resetTime}\n`;
+  }
   text += `  Limits source: ${limits.source}\n`;
 
   return {
