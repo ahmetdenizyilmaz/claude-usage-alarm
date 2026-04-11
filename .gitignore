@@ -1,0 +1,7 @@
+node_modules/
+dist/
+alert-config.json
+limits-config.json
+legacy-budgets.json
+*.output
+.claude/
