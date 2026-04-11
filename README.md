@@ -1,4 +1,4 @@
-# Claude Usage Tracker MCP
+# Claude Usage Alarm MCP
 
 An MCP (Model Context Protocol) server that tracks Claude Code token usage across all sessions and provides configurable alarms with sound notifications.
 
@@ -15,8 +15,8 @@ It reads Claude Code's local session data to calculate usage percentages, burn r
 ## Installation
 
 ```bash
-git clone https://github.com/ahmetdenizyilmaz/claude-usage-tracker.git
-cd claude-usage-tracker
+git clone https://github.com/ahmetdenizyilmaz/claude-usage-alarm.git
+cd claude-usage-alarm
 npm install
 npm run build
 ```
