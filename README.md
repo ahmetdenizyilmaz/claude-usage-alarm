@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.jpg" alt="Claude Usage Alarm" width="100%">
+</p>
+
 # Claude Usage Alarm MCP
 
 An MCP (Model Context Protocol) server that tracks Claude Code token usage across all sessions and provides configurable alarms with sound notifications.
