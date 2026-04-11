@@ -24,7 +24,7 @@ npm run build
 ### Add to Claude Code
 
 ```bash
-claude mcp add usage-tracker -s user -- node /path/to/claude-usage-tracker/dist/index.js
+claude mcp add usage-alarm -s user -- node /path/to/claude-usage-alarm/dist/index.js
 ```
 
 ### Enable automatic alarm checking (optional)
@@ -39,7 +39,7 @@ Add a `Stop` hook to `~/.claude/settings.json`:
         "hooks": [
           {
             "type": "command",
-            "command": "node /path/to/claude-usage-tracker/scripts/check-alarms-cli.js"
+            "command": "node /path/to/claude-usage-alarm/scripts/check-alarms-cli.js"
           }
         ]
       }

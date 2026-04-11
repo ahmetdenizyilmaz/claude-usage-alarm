@@ -1,4 +1,4 @@
-# Claude Usage Tracker MCP
+# Claude Usage Alarm MCP
 
 When starting a session in this project, automatically run `check_alarms` to see if any usage alarms are triggered.
 

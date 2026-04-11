@@ -16,7 +16,7 @@ import { toggleSound } from "./tools/toggle-sound.js";
 import { setPlan, setCustomLimits, recalculateAdaptiveLimits, readLimitsConfig } from "./limits.js";
 
 const server = new McpServer({
-  name: "claude-usage-tracker",
+  name: "claude-usage-alarm",
   version: "2.0.0",
 });
 
