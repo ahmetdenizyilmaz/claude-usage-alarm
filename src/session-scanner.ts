@@ -201,8 +201,16 @@ export async function detectSessionWindowStart(): Promise<{ start: Date; end: Da
     }
   }
 
-  const start = roundToHour(new Date(sessionStartTs));
-  const end = new Date(start.getTime() + SESSION_DURATION_MS);
+  let start = roundToHour(new Date(sessionStartTs));
+  let end = new Date(start.getTime() + SESSION_DURATION_MS);
+
+  // If we've passed the window end, advance to the current window.
+  // Anthropic resets windows on a fixed schedule, so each window is
+  // exactly 5 hours after the previous one started.
+  while (end.getTime() <= now.getTime()) {
+    start = new Date(start.getTime() + SESSION_DURATION_MS);
+    end = new Date(start.getTime() + SESSION_DURATION_MS);
+  }
 
   return { start, end };
 }
