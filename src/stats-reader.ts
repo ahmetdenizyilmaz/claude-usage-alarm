@@ -49,7 +49,10 @@ export function formatDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-export function getDateRange(period: "today" | "week" | "month"): [string, string] {
+export function getDateRange(
+  period: "today" | "week" | "month",
+  opts?: { weekStartOverride?: Date }
+): [string, string] {
   const today = new Date();
   const end = formatDate(today);
   let start: string;
@@ -58,9 +61,16 @@ export function getDateRange(period: "today" | "week" | "month"): [string, strin
       start = end;
       break;
     case "week": {
-      const weekAgo = new Date(today);
-      weekAgo.setDate(weekAgo.getDate() - 6);
-      start = formatDate(weekAgo);
+      // If a plan-specific week start is provided (from the week-reset anchor),
+      // use that date as the inclusive lower bound. Otherwise fall back to the
+      // rolling 7-day window.
+      if (opts?.weekStartOverride) {
+        start = formatDate(opts.weekStartOverride);
+      } else {
+        const weekAgo = new Date(today);
+        weekAgo.setDate(weekAgo.getDate() - 6);
+        start = formatDate(weekAgo);
+      }
       break;
     }
     case "month":

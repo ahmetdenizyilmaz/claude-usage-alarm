@@ -5,9 +5,11 @@ import {
   sumTokensByModel,
   sumActivity,
 } from "../stats-reader.js";
+import { readLimitsConfig, getWeekWindow } from "../limits.js";
 
 export async function getUsageSummary(period: string = "today") {
   const stats = await readStatsCache();
+  const limits = await readLimitsConfig();
 
   if (period === "all") {
     const modelBreakdown: Record<string, object> = {};
@@ -45,7 +47,20 @@ export async function getUsageSummary(period: string = "today") {
     ? (period as "today" | "week" | "month")
     : "today";
 
-  const [start, end] = getDateRange(p);
+  // For the weekly period, honour the configured reset anchor so the window
+  // matches what `/usage` shows, not a raw calendar/rolling 7-day slice.
+  let weekWindowSource: "anchor" | "rolling" | undefined;
+  let weekWindowEndISO: string | undefined;
+  let dateRange: [string, string];
+  if (p === "week") {
+    const ww = getWeekWindow(limits.weekReset.anchorISO);
+    weekWindowSource = ww.source;
+    weekWindowEndISO = ww.end.toISOString();
+    dateRange = getDateRange(p, { weekStartOverride: ww.start });
+  } else {
+    dateRange = getDateRange(p);
+  }
+  const [start, end] = dateRange;
   const tokenEntries = filterByDateRange(stats.dailyModelTokens, start, end);
   const activityEntries = filterByDateRange(stats.dailyActivity, start, end);
 
@@ -56,6 +71,9 @@ export async function getUsageSummary(period: string = "today") {
   return {
     period: p,
     dateRange: { start, end },
+    ...(p === "week"
+      ? { weekWindowSource, nextResetISO: weekWindowEndISO }
+      : {}),
     lastUpdated: stats.lastComputedDate,
     totalTokens: grandTotal,
     byModel,

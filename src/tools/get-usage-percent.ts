@@ -57,7 +57,20 @@ export async function getUsagePercent() {
 
   if (usage.sessionWindow) {
     const resetTime = new Date(usage.sessionWindow.end).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    text += `  Resets ${resetTime}\n`;
+    text += `  Session resets ${resetTime}\n`;
+  }
+  const weekEnd = (usage as any).weekWindow?.end as string | undefined;
+  const weekSrc = (usage as any).weekWindow?.source as string | undefined;
+  if (weekEnd) {
+    const label = new Date(weekEnd).toLocaleString([], {
+      month: "short", day: "numeric",
+      hour: "2-digit", minute: "2-digit",
+    });
+    text += `  Weekly resets ${label}`;
+    if (weekSrc === "rolling") {
+      text += ` (rolling 7d — run set_week_reset for plan-accurate reset)`;
+    }
+    text += `\n`;
   }
   text += `  ${limits.isPeak ? "Peak hours (tokens cost 2x)" : "Off-peak (full rate)"}\n`;
 

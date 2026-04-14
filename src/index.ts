@@ -13,6 +13,7 @@ import { removeAlarm } from "./tools/remove-alarm.js";
 import { listAlarms } from "./tools/list-alarms.js";
 import { checkAlarms } from "./tools/check-alarms.js";
 import { toggleSound } from "./tools/toggle-sound.js";
+import { setWeekResetTool } from "./tools/set-week-reset.js";
 import { setPlan, setCustomLimits, recalculateAdaptiveLimits, readLimitsConfig } from "./limits.js";
 
 const server = new McpServer({
@@ -269,6 +270,30 @@ server.tool(
         },
       ],
     };
+  }
+);
+
+server.tool(
+  "set_week_reset",
+  "Calibrate the weekly budget window to your plan's actual reset time. Paste any upcoming reset timestamp from Claude Code's /usage command (e.g. \"2026-04-20T15:00:00+03:00\"). The tracker rolls this anchor forward in 7-day increments automatically, so you only set it once per plan cycle.",
+  {
+    nextReset: z
+      .string()
+      .optional()
+      .describe("ISO datetime of any upcoming or past weekly reset, e.g. '2026-04-20T15:00:00+03:00'. Pass empty string to clear and fall back to a rolling 7-day window."),
+    sonnetNextReset: z
+      .string()
+      .optional()
+      .describe("Optional separate anchor for the Sonnet-only weekly budget if it resets on a different schedule."),
+  },
+  async ({ nextReset, sonnetNextReset }) => {
+    const params = {
+      nextReset: nextReset === undefined ? undefined : (nextReset === "" ? null : nextReset),
+      sonnetNextReset:
+        sonnetNextReset === undefined ? undefined : (sonnetNextReset === "" ? null : sonnetNextReset),
+    };
+    const result = await setWeekResetTool(params);
+    return { content: [{ type: "text" as const, text: JSON.stringify(result, null, 2) }] };
   }
 );
 

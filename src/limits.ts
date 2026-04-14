@@ -58,6 +58,19 @@ export interface PlanLimits {
   sonnetSessionOutputTokens: number;
 }
 
+export interface WeekResetConfig {
+  /**
+   * Any known future reset time as an ISO datetime.
+   * The tracker rolls this forward in 7-day increments to find the current week window.
+   * Example: "2026-04-20T15:00:00+03:00" (Monday 3pm Europe/Istanbul).
+   */
+  anchorISO: string | null;
+  /**
+   * Optional separate anchor for the Sonnet-only weekly budget (some plans reset it on a different schedule).
+   */
+  sonnetAnchorISO: string | null;
+}
+
 export interface LimitsConfig {
   plan: string;
   hardcoded: PlanLimits;
@@ -69,6 +82,7 @@ export interface LimitsConfig {
     lastCalculated: string | null;
   };
   useAdaptive: boolean;
+  weekReset: WeekResetConfig;
 }
 
 function defaultConfig(): LimitsConfig {
@@ -83,6 +97,10 @@ function defaultConfig(): LimitsConfig {
       lastCalculated: null,
     },
     useAdaptive: true,
+    weekReset: {
+      anchorISO: null,
+      sonnetAnchorISO: null,
+    },
   };
 }
 
@@ -117,6 +135,44 @@ export async function setCustomLimits(limits: Partial<PlanLimits>): Promise<Limi
   if (limits.sessionOutputTokens !== undefined) config.hardcoded.sessionOutputTokens = limits.sessionOutputTokens;
   if (limits.weeklyOutputTokens !== undefined) config.hardcoded.weeklyOutputTokens = limits.weeklyOutputTokens;
   if (limits.sonnetSessionOutputTokens !== undefined) config.hardcoded.sonnetSessionOutputTokens = limits.sonnetSessionOutputTokens;
+  await writeLimitsConfig(config);
+  return config;
+}
+
+
+/**
+ * Compute the current week window [start, end] based on a known reset anchor.
+ */
+export function getWeekWindow(
+  anchorISO: string | null,
+  now: Date = new Date()
+): { start: Date; end: Date; source: "anchor" | "rolling" } {
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  if (!anchorISO) {
+    return { start: new Date(now.getTime() - WEEK_MS), end: now, source: "rolling" };
+  }
+  const anchor = new Date(anchorISO);
+  if (isNaN(anchor.getTime())) {
+    return { start: new Date(now.getTime() - WEEK_MS), end: now, source: "rolling" };
+  }
+  let nextReset = new Date(anchor.getTime());
+  while (nextReset.getTime() <= now.getTime()) {
+    nextReset = new Date(nextReset.getTime() + WEEK_MS);
+  }
+  while (nextReset.getTime() - WEEK_MS > now.getTime()) {
+    nextReset = new Date(nextReset.getTime() - WEEK_MS);
+  }
+  const start = new Date(nextReset.getTime() - WEEK_MS);
+  return { start, end: nextReset, source: "anchor" };
+}
+
+export async function setWeekReset(opts: {
+  anchorISO?: string | null;
+  sonnetAnchorISO?: string | null;
+}): Promise<LimitsConfig> {
+  const config = await readLimitsConfig();
+  if (opts.anchorISO !== undefined) config.weekReset.anchorISO = opts.anchorISO;
+  if (opts.sonnetAnchorISO !== undefined) config.weekReset.sonnetAnchorISO = opts.sonnetAnchorISO;
   await writeLimitsConfig(config);
   return config;
 }
@@ -272,15 +328,24 @@ export async function recalculateAdaptiveLimits(): Promise<LimitsConfig> {
  */
 export async function getCurrentUsageForPercent() {
   const now = new Date();
+  const config = await readLimitsConfig();
 
   // Detect actual session window via gap analysis
   const sessionWindow = await detectSessionWindowStart();
 
+  // Weekly windows use the configured anchors (if any) so the tracker matches
+  // the plan-specific reset time shown by `/usage`, instead of a raw 7-day slice.
+  const weekWindow = getWeekWindow(config.weekReset.anchorISO, now);
+  const sonnetWeekWindow = getWeekWindow(
+    config.weekReset.sonnetAnchorISO ?? config.weekReset.anchorISO,
+    now
+  );
+
   // Weighted scans — each token multiplied by its time-of-day rate
   const [sessionWeighted, weeklyWeighted, sonnetWeighted] = await Promise.all([
     scanWeightedUsage({ cutoffTime: sessionWindow.start }),
-    scanWeightedUsage({ cutoffTime: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) }),
-    scanWeightedUsage({ cutoffTime: sessionWindow.start, model: "claude-sonnet-4-6" }),
+    scanWeightedUsage({ cutoffTime: weekWindow.start }),
+    scanWeightedUsage({ cutoffTime: sonnetWeekWindow.start, model: "claude-sonnet-4-6" }),
   ]);
 
   return {
@@ -291,6 +356,16 @@ export async function getCurrentUsageForPercent() {
     sessionWindow: {
       start: sessionWindow.start.toISOString(),
       end: sessionWindow.end.toISOString(),
+    },
+    weekWindow: {
+      start: weekWindow.start.toISOString(),
+      end: weekWindow.end.toISOString(),
+      source: weekWindow.source,
+    },
+    sonnetWeekWindow: {
+      start: sonnetWeekWindow.start.toISOString(),
+      end: sonnetWeekWindow.end.toISOString(),
+      source: sonnetWeekWindow.source,
     },
     sessionDetails: {
       rawOutputTokens: sessionWeighted.rawOutputTokens,
